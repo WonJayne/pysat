@@ -121,13 +121,20 @@ class build_ext(distutils.command.build_ext.build_ext):
 # compilation flags for C extensions
 #==============================================================================
 compile_flags, cpplib = ['-std=c++11', '-Wall', '-Wno-deprecated'],  ['stdc++']
+link_flags = []
 if platform.system() == 'Darwin':
-    compile_flags += ['--stdlib=libc++']
+    compile_flags += ['--stdlib=libc++', '-O3', '-flto']
+    link_flags += ['-O3', '-flto']
     cpplib = ['c++']
 elif platform.system() == 'Windows':
-    compile_flags = ['-DNBUILD', '-DNLGLYALSAT' , '/DINCREMENTAL', '-DNLGLOG',
-            '-DNDEBUG', '-DNCHKSOL', '-DNLGLFILES', '-DNLGLDEMA', '-I./win']
+    compile_flags = ['-O2', '-flto', '-DNBUILD', '-DNLGLYALSAT', '/DINCREMENTAL',
+            '-DNLGLOG', '-DNDEBUG', '-DNCHKSOL', '-DNLGLFILES', '-DNLGLDEMA',
+            '-I./win']
+    link_flags = ['-O2', '-flto']
     cpplib = []
+else:
+    compile_flags += ['-O3', '-flto']
+    link_flags += ['-O3', '-flto']
 
 
 # C extensions: pycard and pysolvers
@@ -135,6 +142,7 @@ elif platform.system() == 'Windows':
 pycard_ext = Extension('pycard',
     sources=['cardenc/pycard.cc'],
     extra_compile_args=compile_flags,
+    extra_link_args=link_flags,
     include_dirs=['cardenc'] ,
     language='c++',
     libraries=cpplib,
@@ -162,6 +170,7 @@ pysolvers_ext = Extension('pysolvers',
     sources=pysolvers_sources,
     extra_compile_args=compile_flags + \
         list(map(lambda x: '-DWITH_{0}'.format(x.upper()), to_install)),
+    extra_link_args=link_flags,
     include_dirs=['solvers'],
     language='c++',
     libraries=libraries,
