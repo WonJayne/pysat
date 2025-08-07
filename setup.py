@@ -25,6 +25,7 @@ except ImportError:
 import distutils.command.build
 import distutils.command.build_ext
 import distutils.command.install
+import distutils.ccompiler
 
 import inspect, os, sys
 sys.path.insert(0, os.path.join(os.path.realpath(os.path.abspath(os.path.split(inspect.getfile(inspect.currentframe()))[0])), 'solvers/'))
@@ -127,10 +128,17 @@ if platform.system() == 'Darwin':
     link_flags += ['-O3', '-flto']
     cpplib = ['c++']
 elif platform.system() == 'Windows':
-    compile_flags = ['-O2', '-flto', '-DNBUILD', '-DNLGLYALSAT', '/DINCREMENTAL',
+    compiler = distutils.ccompiler.get_default_compiler()
+    compile_flags = ['-DNBUILD', '-DNLGLYALSAT', '/DINCREMENTAL',
             '-DNLGLOG', '-DNDEBUG', '-DNCHKSOL', '-DNLGLFILES', '-DNLGLDEMA',
             '-I./win']
-    link_flags = ['-O2', '-flto']
+    link_flags = []
+    if compiler == 'msvc':
+        compile_flags += ['/O2', '/GL']
+        link_flags += ['/LTCG']
+    else:
+        compile_flags += ['-O2', '-flto']
+        link_flags += ['-O2', '-flto']
     cpplib = []
 else:
     compile_flags += ['-O3', '-flto']
