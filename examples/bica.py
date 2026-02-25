@@ -51,7 +51,7 @@
     navigation to determine the Southern Celestial Pole.)
 
     .. [1] Alexey Ignatiev, Alessandro Previti, Joao Marques-Silva.
-        *SAT-Based Formula Simplification*. SAT 2015. pp. 287-298
+        *SAT-Based Formula Simplification*. SAT 2015. pp. 287-298
 
     .. [2] Willard V. Quine. *The Problem of Simplifying Truth Functions*.
         American Mathematical Monthly 59(8). 1952. pp. 521-531
@@ -259,13 +259,12 @@ class Bica:
         :type otrim: int
         :type weighted: bool
         :type verbose: int
-
     """
 
-    def __init__(self, formula, negated=None, target='cnf', psolver='g3',
+    def __init__(self, formula, negated=None, target='cnf', psolver='cd19',
                  padapt=False, pdcalls=False, pexhaust=False, pminz=False,
                  ppuresat=False, psearch='lin', punsorted=False, ptrim=False,
-                 osolver='g3', oadapt=False, odcalls=False, oexhaust=False,
+                 osolver='mgh', oadapt=False, odcalls=False, oexhaust=False,
                  ominz=False, onodisj=False, opuresat=False, ounsorted=False,
                  otrim=False, weighted=False, verbose=0):
         """
@@ -538,7 +537,7 @@ def parse_options():
     ominz = False
     nodisj = False
     psolver = 'cd19'
-    osolver = 'cd19'
+    osolver = 'mgh'
     ppuresat = False
     opuresat = False
     punsorted = False
@@ -638,7 +637,7 @@ def usage():
     print('        -s, --psolver              SAT solver to use [Primer]')
     print('                                   Available values: cd, cd15, cd19, g3, g41, g42, lgl, mcb, mcm, mpl, m22, mc, mg3, mgh (default = cd19)')
     print('        -S, --osolver              SAT solver to use [OptUx]')
-    print('                                   Available values: cd, cd15, cd19, g3, g41, g42, lgl, mcb, mcm, mpl, m22, mc, mg3, mgh (default = cd19)')
+    print('                                   Available values: cd, cd15, cd19, g3, g41, g42, lgl, mcb, mcm, mpl, m22, mc, mg3, mgh (default = mgh)')
     print('        -t, --ptrim=<int>          How many times to trim unsatisfiable cores [Primer]')
     print('                                   Available values: [0 .. INT_MAX] (default = 0)')
     print('        -T, --otrim=<int>          How many times to trim unsatisfiable cores [OptUx]')
@@ -662,8 +661,8 @@ if __name__ == '__main__':
 
     if files:
         # read CNF from file
-        if re.search(r'cnf(\.(gz|bz2|lzma|xz))?$', files[0]):
-            formula = CNF(from_file=files[0])
+        assert re.search(r'cnf(\.(gz|bz2|lzma|xz|zst))?$', files[0]), 'Unknown input file extension'
+        formula = CNF(from_file=files[0])
 
         # creating an object of Primer
         with Bica(formula, negated=None, target=mode, psolver=psolver,

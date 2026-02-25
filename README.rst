@@ -1,6 +1,31 @@
 PySAT: SAT technology in Python
 ===============================
 
+|version|
+|tests|
+|downloads|
+|license|
+|sat18|
+|sat24|
+
+.. |version| image:: https://img.shields.io/pypi/v/python-sat
+   :target: https://pysathq.github.io/
+
+.. |tests| image:: https://img.shields.io/github/actions/workflow/status/pysathq/pysat/test.yml?label=tests
+   :target: https://github.com/pysathq/pysat
+
+.. |downloads| image:: https://img.shields.io/pypi/dm/python-sat
+   :target: https://pypi.org/project/python-sat/
+
+.. |license| image:: https://img.shields.io/github/license/pysathq/pysat
+   :target: https://github.com/pysathq/pysat/blob/master/LICENSE.txt
+
+.. |sat18| image:: https://img.shields.io/badge/doi-10.1007%2F978--3--319--94144--8_26-blue
+   :target: https://doi.org/10.1007/978-3-319-94144-8_26
+
+.. |sat24| image:: https://img.shields.io/badge/doi-10.4230%2FLIPICS.SAT.2024.16-blue
+   :target: https://doi.org/10.4230/LIPIcs.SAT.2024.16
+
 PySAT is a Python (2.7, 3.4+) toolkit, which aims at providing a simple and
 unified interface to a number of state-of-art `Boolean satisfiability (SAT)
 <https://en.wikipedia.org/wiki/Boolean_satisfiability_problem>`__ solvers as
@@ -44,6 +69,7 @@ Minisat-based solvers only *core* versions are integrated):
 -  Glucose (`3.0 <http://www.labri.fr/perso/lsimon/glucose/>`__)
 -  Glucose (`4.1 <http://www.labri.fr/perso/lsimon/glucose/>`__)
 -  Glucose (`4.2.1 <http://www.labri.fr/perso/lsimon/glucose/>`__)
+-  Kissat (`rel-4.0.4 <https://github.com/arminbiere/kissat>`__)
 -  Lingeling (`bbc-9230380-160707 <http://fmv.jku.at/lingeling/>`__)
 -  MapleLCMDistChronoBT (`SAT competition 2018 version <http://sat2018.forsyte.tuwien.ac.at/solvers/main_and_glucose_hack/>`__)
 -  MapleCM (`SAT competition 2018 version <http://sat2018.forsyte.tuwien.ac.at/solvers/main_and_glucose_hack/>`__)

@@ -297,19 +297,28 @@ class IDPool(object):
         necessary the top variable ID can be accessed directly using the
         ``top`` variable.
 
+        The final parameter ``with_neg``, if set to ``True``, indicates that
+        the *negation* of an object assigned a variable ID ``n`` is to be
+        represented using the negative integer ``-n``. For this to work, the
+        object must have the method ``__neg__()`` implemented. This behaviour
+        is disabled by default.
+
         :param start_from: the smallest ID to assign.
         :param occupied: a list of occupied intervals.
+        :param with_neg: whether to support automatic negation handling
 
         :type start_from: int
         :type occupied: list(list(int))
+        :type with_neg: bool
     """
 
-    def __init__(self, start_from=1, occupied=[]):
+    def __init__(self, start_from=1, occupied=[], with_neg=False):
         """
             Constructor.
         """
 
-        self.restart(start_from=start_from, occupied=occupied)
+        self.restart(start_from=start_from, occupied=occupied,
+                     with_neg=with_neg)
 
     def __repr__(self):
         """
@@ -318,7 +327,7 @@ class IDPool(object):
 
         return f'IDPool(start_from={self.top+1}, occupied={self._occupied})'
 
-    def restart(self, start_from=1, occupied=[]):
+    def restart(self, start_from=1, occupied=[], with_neg=False):
         """
             Restart the manager from scratch. The arguments replicate those of
             the constructor of :class:`IDPool`.
@@ -336,6 +345,10 @@ class IDPool(object):
         # mapping back from variable IDs to objects
         # (if for whatever reason necessary)
         self.id2obj = {}
+
+        # flag to indicate whether this IDPool object
+        # should support automatic negation handling
+        self.with_neg = with_neg
 
     def id(self, obj=None):
         """
@@ -385,6 +398,11 @@ class IDPool(object):
 
             if vid not in self.id2obj:
                 self.id2obj[vid] = obj
+
+                # adding the object's negation, if required and supported
+                if self.with_neg and hasattr(obj, '__neg__'):
+                    self.obj2id[-obj] = -vid
+                    self.id2obj[-vid] = -obj
         else:
             # no object is provided => simply return a new ID
             vid = self._next()
@@ -879,45 +897,26 @@ class Formula(object):
             if type(collection) in (tuple, list, set):
                 collection = tuple(filter(lambda x: x or x == False, collection))
 
-                if len(collection) > 1:
-                    if _hashable(collection):
-                        # it is a hashable iterable; it is better to sort it
-                        items.append((prefix, repr(sorted(collection, key=lambda x: hash(x)))))
+                for item in collection:
+                    if isinstance(item, Iterable):
+                        items.extend(_flatten(item, prefix=prefix))
                     else:
-                        for i, item in enumerate(collection):
-                            if _hashable(item):
-                                # it is a hashable iterable; it is better to sort it
-                                if isinstance(item, Iterable):
-                                    item = sorted(item, key=lambda x: hash(x))
-
-                                items.append((prefix, repr(item)))
-                            elif isinstance(item, Iterable):
-                                items.extend(_flatten(item, prefix=prefix))
-                            else:
-                                raise FormulaError('No key can be computed for this formula object')
-                elif collection:
-                    items.extend(_flatten(collection[0], prefix=prefix))
+                        items.append((prefix, item))
 
             # next, checking if it is a dictionary
             elif isinstance(collection, dict):
                 for key in collection.keys():
                     value = collection[key]
                     new_key = prefix + sep + key if prefix else key
-                    if value and _hashable(value):
-                        # it is a hashable iterable; it is better to sort it
-                        if isinstance(value, Iterable):
-                            value = sorted(value, key=lambda x: hash(x))
-
-                        items.append((new_key, repr(value)))
-                    elif isinstance(value, Iterable):
-                        if value:
-                            items.extend(_flatten(value, new_key, sep=sep))
+                    if isinstance(value, Iterable) and value:
+                        items.extend(_flatten(value, prefix=new_key, sep=sep))
                     else:
-                        raise FormulaError('No key can be computed for this formula object')
+
+                        items.append((new_key, value))
 
             # finally, it is a simple non-empty object
             elif collection or collection == False:
-                items.append((prefix, repr(collection)))
+                items.append((prefix, collection))
 
             return items
 
@@ -929,46 +928,68 @@ class Formula(object):
                 args[0] = tuple(args[0][1:])
 
         # flattening all the inputs
-        key = _flatten(args) + _flatten(kwargs)
+        items = _flatten(args) + _flatten(kwargs)
+        ftype, subfs, extra = None, [], []
 
-        # we can arguments with but also without keywords:
-        if len(key) == 2 and key[0][0] == '':
-            # there are two components in the key and the first one is unnamed
-            # this can happen for Atom or Neg and it so we name it accordingly
-            key[0] = ('object' if key[1][1] == repr(FormulaType.ATOM) else 'subformula', key[0][1])
-        elif len(key) == 3 and key[2][1] == repr(FormulaType.IMPL):
-            if key[0][0] == '' and key[1][0] == '':
-                key[0] = ('left', key[0][1])
-                key[1] = ('right', key[1][1])
-            elif key[1][0] == 'left':
-                key[0] = ('right', key[0][1])
-            elif key[1][0] == 'right':
-                key[0] = ('left', key[0][1])
-        elif len(key) == 4 and key[3][1] == repr(FormulaType.ITE):
-            # dealing with ITE triples - the most complicated case
-            if key[0][0] == '' and key[1][0] == '' and key[2][0] == '':
-                key[0] = ('cond', key[0][1])
-                key[1] = ('cons1', key[1][1])
-                key[2] = ('cons2',  key[2][1])
-            elif key[0][0] == key[1][0] == '':
-                if key[2][0] == 'cond':
-                    key[0] = ('cons1', key[0][1])
-                    key[1] = ('cons2', key[1][1])
-                elif key[2][0] == 'cons1':
-                    key[0] = ('cond',  key[0][1])
-                    key[1] = ('cons2', key[1][1])
-                elif key[2][0] == 'cons2':
-                    key[0] = ('cond',  key[0][1])
-                    key[1] = ('cons1', key[1][1])
-            elif key[0] == '':
-                if 'cond' not in (key[1][0], key[2][0]):
-                    key[0] = ('cond', key[0][0])
-                elif 'cons1' not in (key[1][0], key[2][0]):
-                    key[0] = ('cons1', key[0][0])
-                elif 'cons2' not in (key[1][0], key[2][0]):
-                    key[0] = ('cons2', key[0][0])
+        # ignoring everything except subformulas and the type
+        for item in items:
+            if item[0] == 'type':
+                ftype = item
+            elif item[0] != 'merge':
+                subfs.append(item)
+            else:
+                extra = [('merge', repr(item[1]))]
 
-        return tuple(sorted(key))
+        # the ugly part:
+        # reconstructing the key pairs, depending on the type of Formula
+        if ftype[1] == FormulaType.ATOM:
+            assert len(subfs) == 1, 'A single object is required for an Atom formula'
+            subfs[0] = ('object', repr(subfs[0][1]))
+        elif ftype[1] == FormulaType.NEG:
+            assert len(subfs) == 1, 'A single subformula is required for a Neg formula'
+            subfs[0] = ('subformula', id(subfs[0][1]))
+        elif ftype[1] == FormulaType.IMPL:
+            assert len(subfs) == 2, 'Two subformulas are required for an Implies formula'
+            if subfs[0][0] == '' and subfs[1][0] == '':
+                subfs[0] = ('left', id(subfs[0][1]))
+                subfs[1] = ('right', id(subfs[1][1]))
+            elif subfs[1][0] == 'left':
+                subfs[0] = ('right', id(subfs[0][1]))
+            elif subfs[1][0] == 'right':
+                subfs[0] = ('left', id(subfs[0][1]))
+        elif ftype[1] == FormulaType.ITE:
+            assert len(subfs) == 3, 'Three subformulas are required for an ITE formula'
+            if subfs[0][0] == '' and subfs[1][0] == '' and subfs[2][0] == '':
+                subfs[0] = ('cond', id(subfs[0][1]))
+                subfs[1] = ('cons1', id(subfs[1][1]))
+                subfs[2] = ('cons2',  id(subfs[2][1]))
+            elif subfs[0][0] == subfs[1][0] == '':
+                if subfs[2][0] == 'cond':
+                    subfs[0] = ('cons1', id(subfs[0][1]))
+                    subfs[1] = ('cons2', id(subfs[1][1]))
+                elif subfs[2][0] == 'cons1':
+                    subfs[0] = ('cond',  id(subfs[0][1]))
+                    subfs[1] = ('cons2', id(subfs[1][1]))
+                elif subfs[2][0] == 'cons2':
+                    subfs[0] = ('cond',  id(subfs[0][1]))
+                    subfs[1] = ('cons1', id(subfs[1][1]))
+            elif subfs[0] == '':
+                if 'cond' not in (subfs[1][0], subfs[2][0]):
+                    subfs[0] = ('cond', id(subfs[0][0]))
+                elif 'cons1' not in (subfs[1][0], subfs[2][0]):
+                    subfs[0] = ('cons1', id(subfs[0][0]))
+                elif 'cons2' not in (subfs[1][0], subfs[2][0]):
+                    subfs[0] = ('cons2', id(subfs[0][0]))
+        else:
+            # these are commutative connectives; we need to sort the arguments
+            assert len(subfs) >= 1, 'At least one subformula is required for an And/Equals/Or/XOr formula'
+            subfs = sorted(map(lambda p: (p[0], repr(id(p[1]))), subfs))
+
+            if not extra:
+                extra = [('merge', repr(False))]
+
+        # the key is a string combining all the parts
+        return ' '.join([f'{repr(p[0])}:{repr(p[1])}' for p in [ftype] + subfs + extra])
 
     def __hash__(self):
         """
@@ -1018,6 +1039,13 @@ class Formula(object):
                 return PYSAT_TRUE
             return Neg(self)
         return self.subformula
+
+    def __neg__(self):
+        """
+            Negation operator. Takes the same effect as ``__invert__()``.
+        """
+
+        return self.__invert__()
 
     def __and__(self, other):
         """
@@ -1126,7 +1154,7 @@ class Formula(object):
             b)``.
         """
 
-        return XOr(self, other)
+        return XOr(self, other, merge=True)
 
     def __ixor__(self, other):
         """
@@ -1135,7 +1163,7 @@ class Formula(object):
             ``a`` to a new object ``XOr(a, b)``.
         """
 
-        return XOr(self, other)
+        return XOr(self, other, merge=True)
 
     def __iter__(self):
         """
@@ -1167,7 +1195,7 @@ class Formula(object):
         self.clausify()
 
         # then recursively iterate through the clauses
-        for cl in self._iter(outermost=True):
+        for cl in self._iter({}, outermost=True):
             if PYSAT_TRUE.name not in cl:
                 yield [l for l in cl if l != PYSAT_FALSE.name]
 
@@ -1418,16 +1446,19 @@ class Atom(Formula):
         self.encoded = []  # always empty
         self.object = None
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. Does nothing as there are no
             clauses to iterate through.
         """
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+        if not self in seen:
+            seen[self] = True
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def _clausify(self, name_required=True):
         """
@@ -1547,7 +1578,7 @@ class And(Formula):
             "And[And[Atom('x'), Atom('y')], Atom('z')]"
             >>> repr(a2)
             "And[Atom('x'), Atom('y'), Atom('z')]"
-            >>> repr(a2)
+            >>> repr(a3)
             "And[Atom('x'), Atom('y'), Atom('z')]"
             >>>
             >>> id(a1) == id(a2)
@@ -1599,20 +1630,23 @@ class And(Formula):
         self.encoded = []
         self.subformulas = []
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. First, iterates through the
             clauses of the subformulas followed by the formula's own clauses.
         """
 
-        for sub in self.subformulas:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in self.subformulas:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -1832,20 +1866,23 @@ class Or(Formula):
         self.encoded = []
         self.subformulas = []
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. First, iterates through the
             clauses of the subformulas followed by the formula's own clauses.
         """
 
-        for sub in self.subformulas:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in self.subformulas:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -2028,18 +2065,21 @@ class Neg(Formula):
         self.encoded = []
         self.subformula = None
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Recursive iterator through the clauses.
         """
 
-        for cl in self.subformula._iter():
-            yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for cl in self.subformula._iter(seen):
+                yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -2195,21 +2235,24 @@ class Implies(Formula):
         self.encoded = []
         self.left = self.right = None
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Clause iterator. Recursively iterates through the clauses of
             ``left`` and ``right`` subformulas followed by own clause
             traversal.
         """
 
-        for sub in [self.left, self.right]:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in [self.left, self.right]:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -2418,20 +2461,23 @@ class Equals(Formula):
         self.encoded = []
         self.subformulas = []
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. First, iterates through the
             clauses of the subformulas followed by the formula's own clauses.
         """
 
-        for sub in self.subformulas:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in self.subformulas:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -2648,8 +2694,9 @@ class XOr(Formula):
     def __init__(self, *args, **kwargs):
         """
             Initialiser. Expects a list of arguments signifying the operands
-            of the equivalence. Additionally, a user may set a keyword
-            argument ``merge=True``, which will enable merging sub-operands.
+            of the exclusive disjunction. Additionally, a user may set a
+            keyword argument ``merge=True``, which will enable merging
+            sub-operands.
         """
 
         super(XOr, self).__init__(type=FormulaType.XOR)
@@ -2663,7 +2710,7 @@ class XOr(Formula):
             self.merged = False
 
         if len(self.subformulas) < 2:
-            raise FormulaError('Equivalence requires at least 2 arguments')
+            raise FormulaError('XOr requires at least 2 arguments')
 
     def __del__(self):
         """
@@ -2675,20 +2722,23 @@ class XOr(Formula):
         self.encoded = []
         self.subformulas = []
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. First, iterates through the
             clauses of the subformulas followed by the formula's own clauses.
         """
 
-        for sub in self.subformulas:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in self.subformulas:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -2941,20 +2991,23 @@ class ITE(Formula):
         self.encoded = []
         self.cond = self.cons1 = self.cons2 = None
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             Internal iterator over the clauses. First, iterates through the
             clauses of the subformulas followed by the formula's own clauses.
         """
 
-        for sub in [self.cond, self.cons1, self.cons2]:
-            for cl in sub._iter():
-                yield cl
+        if not self in seen:
+            seen[self] = True
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+            for sub in [self.cond, self.cons1, self.cons2]:
+                for cl in sub._iter(seen):
+                    yield cl
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -3176,7 +3229,7 @@ class CNF(Formula, object):
             Read a CNF formula from a file in the DIMACS format. A file name is
             expected as an argument. A default argument is ``comment_lead`` for
             parsing comment lines. A given file can be compressed by either
-            gzip, bzip2, or lzma.
+            gzip, bzip2, lzma, or zstd.
 
             :param fname: name of a file to parse.
             :param comment_lead: a list of characters leading comment lines
@@ -3187,11 +3240,12 @@ class CNF(Formula, object):
             :type compressed_with: str
 
             Note that the ``compressed_with`` parameter can be ``None`` (i.e.
-            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``, or
-            ``'use_ext'``. The latter value indicates that compression type
-            should be automatically determined based on the file extension.
-            Using ``'lzma'`` in Python 2 requires the ``backports.lzma``
-            package to be additionally installed.
+            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``,
+            ``'zstd'``, or ``'use_ext'``. The latter value indicates that
+            compression type should be automatically determined based on the
+            file extension. Using ``'lzma'`` in Python 2 requires the
+            ``backports.lzma`` package to be additionally installed. Using
+            ``'zstd'`` requires Python 3.14.
 
             Usage example:
 
@@ -3409,7 +3463,7 @@ class CNF(Formula, object):
             CNF format. A file name is expected as an argument. Additionally,
             supplementary comment lines can be specified in the ``comments``
             parameter. Also, a file can be compressed using either gzip, bzip2,
-            or lzma (xz).
+            lzma (xz), or zstd.
 
             :param fname: a file name where to store the formula.
             :param comments: additional comments to put in the file.
@@ -3421,12 +3475,13 @@ class CNF(Formula, object):
             :type as_dnf: bool
             :type compress_with: str
 
-            Note that the ``compress_with`` parameter can be ``None`` (i.e.
-            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``, or
-            ``'use_ext'``. The latter value indicates that compression type
-            should be automatically determined based on the file extension.
-            Using ``'lzma'`` in Python 2 requires the ``backports.lzma``
-            package to be additionally installed.
+            Note that the ``compressed_with`` parameter can be ``None`` (i.e.
+            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``,
+            ``'zstd'``, or ``'use_ext'``. The latter value indicates that
+            compression type should be automatically determined based on the
+            file extension. Using ``'lzma'`` in Python 2 requires the
+            ``backports.lzma`` package to be additionally installed. Using
+            ``'zstd'`` requires Python 3.14.
 
             Example:
 
@@ -3854,16 +3909,19 @@ class CNF(Formula, object):
 
         dest |= set(range(1, self.nv + 1))
 
-    def _iter(self, outermost=False):
+    def _iter(self, seen, outermost=False):
         """
             This is a copy of :meth:`__iter__`, to be consistent with
             :class:`Formula`.
         """
 
-        if outermost:
-            yield from self.clauses
-        else:
-            yield from self.encoded
+        if not self in seen:
+            seen[self] = True
+
+            if outermost:
+                yield from self.clauses
+            else:
+                yield from self.encoded
 
     def simplified(self, assumptions=[]):
         """
@@ -3929,7 +3987,7 @@ class WCNF(object):
             Read a WCNF formula from a file in the DIMACS format. A file name
             is expected as an argument. A default argument is ``comment_lead``
             for parsing comment lines. A given file can be compressed by either
-            gzip, bzip2, or lzma.
+            gzip, bzip2, lzma, or zstd.
 
             :param fname: name of a file to parse.
             :param comment_lead: a list of characters leading comment lines
@@ -3940,11 +3998,12 @@ class WCNF(object):
             :type compressed_with: str
 
             Note that the ``compressed_with`` parameter can be ``None`` (i.e.
-            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``, or
-            ``'use_ext'``. The latter value indicates that compression type
-            should be automatically determined based on the file extension.
-            Using ``'lzma'`` in Python 2 requires the ``backports.lzma``
-            package to be additionally installed.
+            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``,
+            ``'zstd'``, or ``'use_ext'``. The latter value indicates that
+            compression type should be automatically determined based on the
+            file extension. Using ``'lzma'`` in Python 2 requires the
+            ``backports.lzma`` package to be additionally installed. Using
+            ``'zstd'`` requires Python 3.14.
 
             Usage example:
 
@@ -3977,25 +4036,33 @@ class WCNF(object):
 
             .. code-block:: python
 
-                >>> with open('some-file.cnf', 'r') as fp:
+                >>> with open('some-file.wcnf', 'r') as fp:
                 ...     cnf1 = WCNF()
                 ...     cnf1.from_fp(fp)
                 >>>
-                >>> with open('another-file.cnf', 'r') as fp:
+                >>> with open('another-file.wcnf', 'r') as fp:
                 ...     cnf2 = WCNF(from_fp=fp)
         """
 
         def parse_wght(string):
-            wght = float(string)
-            return int(wght) if wght.is_integer() else decimal.Decimal(string)
+            if string == 'h':
+                return None
+            else:
+                wght = float(string)
+                return int(wght) if wght.is_integer() else decimal.Decimal(string)
 
         self.nv = 0
         self.hard = []
         self.soft = []
         self.wght = []
-        self.topw = 1
+        self.topw = decimal.Decimal('+inf')
         self.comments = []
         comment_lead = set(['p']).union(set(comment_lead))
+
+        # we are now expecting the new WCNF format
+        assert 'h' not in comment_lead, \
+                "Character 'h' cannot be used for comments" \
+                " (reserved to signify hard clauses)"
 
         # soft clauses with negative weights
         negs = []
@@ -4007,7 +4074,7 @@ class WCNF(object):
                     w, items = line.split(sep=None, maxsplit=1)
                     w = parse_wght(w)
 
-                    if w >= self.topw:
+                    if w is None or w >= self.topw:
                         self.hard.append(list(map(int, items.split()[:-1])))
                     elif w > 0:
                         self.soft.append(list(map(int, items.split()[:-1])))
@@ -4019,12 +4086,16 @@ class WCNF(object):
                 elif not line.startswith('p wcnf '):
                     self.comments.append(line)
                 else: # expecting the preamble
+                    assert len(self.soft) == len(self.hard) == 0, \
+                            'Preamble goes after some of the clauses have been read'
+
                     preamble = line.split(' ')
                     if len(preamble) == 5: # preamble should be "p wcnf nvars nclauses topw"
                         self.topw = parse_wght(preamble[-1])
                     else: # preamble should be "p wcnf nvars nclauses", with topw omitted
                         self.topw = decimal.Decimal('+inf')
 
+        # potentially expensive: calculating the largest variable identifier
         self.nv = max(map(lambda cl: max(map(abs, cl)), itertools.chain.from_iterable([[[self.nv]], self.hard, self.soft])))
 
         # if there is any soft clause with negative weight
@@ -4139,28 +4210,37 @@ class WCNF(object):
 
         return wcnf
 
-    def to_file(self, fname, comments=None, compress_with='use_ext'):
+    def to_file(self, fname, comments=None, compress_with='use_ext',
+                format='mse22'):
         """
             The method is for saving a WCNF formula into a file in the DIMACS
             CNF format. A file name is expected as an argument. Additionally,
             supplementary comment lines can be specified in the ``comments``
             parameter. Also, a file can be compressed using either gzip, bzip2,
-            or lzma (xz).
+            lzma (xz), or zstd.
+
+            The ``format`` parameter can be set either to value ``'mse22'``
+            (set by default) or ``'legacy'``. Both variants are described on
+            the `MSE 2022 webpage
+            <https://maxsat-evaluations.github.io/2022/rules.html#input>`__.
 
             :param fname: a file name where to store the formula.
             :param comments: additional comments to put in the file.
             :param compress_with: file compression algorithm
+            :param format: WCNF format to use
 
             :type fname: str
             :type comments: list(str)
             :type compress_with: str
+            :type format: str
 
-            Note that the ``compress_with`` parameter can be ``None`` (i.e.
-            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``, or
-            ``'use_ext'``. The latter value indicates that compression type
-            should be automatically determined based on the file extension.
-            Using ``'lzma'`` in Python 2 requires the ``backports.lzma``
-            package to be additionally installed.
+            Note that the ``compressed_with`` parameter can be ``None`` (i.e.
+            the file is uncompressed), ``'gzip'``, ``'bzip2'``, ``'lzma'``,
+            ``'zstd'``, or ``'use_ext'``. The latter value indicates that
+            compression type should be automatically determined based on the
+            file extension. Using ``'lzma'`` in Python 2 requires the
+            ``backports.lzma`` package to be additionally installed. Using
+            ``'zstd'`` requires Python 3.14.
 
             Example:
 
@@ -4174,20 +4254,27 @@ class WCNF(object):
         """
 
         with FileObject(fname, mode='w', compression=compress_with) as fobj:
-            self.to_fp(fobj.fp, comments)
+            self.to_fp(fobj.fp, comments, format=format)
 
-    def to_fp(self, file_pointer, comments=None):
+    def to_fp(self, file_pointer, comments=None, format='mse22'):
         """
             The method can be used to save a WCNF formula into a file pointer.
             The file pointer is expected as an argument. Additionally,
             supplementary comment lines can be specified in the ``comments``
             parameter.
 
+            The ``format`` parameter can be set either to value ``'mse22'``
+            (set by default) or ``'legacy'``. Both variants are described on
+            the `MSE 2022 webpage
+            <https://maxsat-evaluations.github.io/2022/rules.html#input>`__.
+
             :param file_pointer: a file pointer where to store the formula.
             :param comments: additional comments to put in the file.
+            :param format: WCNF format to use
 
             :type file_pointer: file pointer
             :type comments: list(str)
+            :type format: str
 
             Example:
 
@@ -4210,21 +4297,32 @@ class WCNF(object):
             for c in comments:
                 print(c, file=file_pointer)
 
-        print('p wcnf', self.nv, len(self.hard) + len(self.soft), self.topw, file=file_pointer)
+        if format == 'legacy':
+            print('p wcnf', self.nv, len(self.hard) + len(self.soft), self.topw, file=file_pointer)
 
         # soft clauses are dumped first because
         # some tools (e.g. LBX) cannot count them properly
         for i, cl in enumerate(self.soft):
             print(self.wght[i], ' '.join(str(l) for l in cl), '0', file=file_pointer)
 
+        # hard clause either have a top weight or are marked as 'h'
+        topw = self.topw if format == 'legacy' else 'h'
         for cl in self.hard:
-            print(self.topw, ' '.join(str(l) for l in cl), '0', file=file_pointer)
+            print(topw, ' '.join(str(l) for l in cl), '0', file=file_pointer)
 
-    def to_dimacs(self):
+    def to_dimacs(self, format='mse22'):
         """
             Return the current state of the object in extended DIMACS format.
 
-            For example, if 'some-file.cnf' contains:
+            The ``format`` parameter can be set either to value ``'mse22'``
+            (set by default) or ``'legacy'``. Both variants are described on
+            the `MSE 2022 webpage
+            <https://maxsat-evaluations.github.io/2022/rules.html#input>`__.
+
+            :param format: WCNF format to use
+            :type format: str
+
+            For example, if 'some-file.wcnf' contains:
 
             ::
 
@@ -4239,19 +4337,30 @@ class WCNF(object):
             .. code-block:: python
 
                 >>> from pysat.formula import WCNF
-                >>> cnf = WCNF(from_file='some-file.cnf')
-                >>> print(cnf.to_dimacs())
+                >>> cnf = WCNF(from_file='some-file.wcnf')
+                >>> print(cnf.to_dimacs(format='legacy'))
                 c Example
                 p wcnf 2 3 10
                 10 1 2 0
                 1 -1 0
                 2 -2 0
+                >>>
+                >>> print(cnf.to_dimacs())
+                c Example
+                h 1 2 0
+                1 -1 0
+                2 -2 0
         """
 
-        header_lines = [f'p wcnf {self.nv} {len(self.hard) + len(self.soft)} {self.topw}']
         comment_lines = [f'{comment}' for comment in self.comments]
-        hard_lines = [f'{self.topw} ' + ' '.join(map(str, clause)) + ' 0' for clause in self.hard]
         soft_lines = [f'{weight} ' + ' '.join(map(str, clause)) + ' 0' for clause, weight in zip(self.soft, self.wght)]
+
+        if format == 'legacy':
+            header_lines = [f'p wcnf {self.nv} {len(self.hard) + len(self.soft)} {self.topw}']
+            hard_lines = [f'{self.topw} ' + ' '.join(map(str, clause)) + ' 0' for clause in self.hard]
+        else:
+            header_lines = []
+            hard_lines = ['h ' + ' '.join(map(str, clause)) + ' 0' for clause in self.hard]
 
         lines = '\n'.join(comment_lines + header_lines + hard_lines + soft_lines)
         return lines
@@ -5113,17 +5222,25 @@ class WCNFPlus(WCNF, object):
         """
 
         def parse_wght(string):
-            wght = float(string)
-            return int(wght) if wght.is_integer() else decimal.Decimal(string)
+            if string == 'h':
+                return None
+            else:
+                wght = float(string)
+                return int(wght) if wght.is_integer() else decimal.Decimal(string)
 
         self.nv = 0
         self.hard = []
         self.atms = []
         self.soft = []
         self.wght = []
-        self.topw = 1
+        self.topw = decimal.Decimal('+inf')
         self.comments = []
         comment_lead = set(['p']).union(set(comment_lead))
+
+        # we are now expecting the new WCNF format
+        assert 'h' not in comment_lead, \
+                "Character 'h' cannot be used for comments" \
+                " (reserved to signify hard clauses)"
 
         # soft clauses with negative weights
         negs = []
@@ -5136,7 +5253,7 @@ class WCNFPlus(WCNF, object):
                         w, items = line.split(sep=None, maxsplit=1)
                         w = parse_wght(w)
 
-                        if w >= self.topw:
+                        if w is None or w >= self.topw:
                             self.hard.append(list(map(int, items.split()[:-1])))
                         elif w > 0:
                             self.soft.append(list(map(int, items.split()[:-1])))
@@ -5167,6 +5284,9 @@ class WCNFPlus(WCNF, object):
                 elif not line.startswith('p wcnf'):  # wcnf is allowed here
                     self.comments.append(line)
                 else:  # expecting the preamble
+                    assert len(self.soft) == len(self.hard) == len(self.atms) == 0, \
+                            'Preamble goes after some of the clauses have been read'
+
                     preamble = line.split(' ')
                     if len(preamble) == 5: # preamble should be "p wcnf nvars nclauses topw"
                         self.topw = parse_wght(preamble[-1])
@@ -5186,18 +5306,25 @@ class WCNFPlus(WCNF, object):
         if type(self.topw) == decimal.Decimal and self.topw.is_infinite():
             self.topw = 1 + sum(self.wght)
 
-    def to_fp(self, file_pointer, comments=None):
+    def to_fp(self, file_pointer, comments=None, format='mse22'):
         """
             The method can be used to save a WCNF+ formula into a file pointer.
             The file pointer is expected as an argument. Additionally,
             supplementary comment lines can be specified in the ``comments``
             parameter.
 
+            The ``format`` parameter can be set either to value ``'mse22'``
+            (set by default) or ``'legacy'``. Both variants are described on
+            the `MSE 2022 webpage
+            <https://maxsat-evaluations.github.io/2022/rules.html#input>`__.
+
             :param file_pointer: a file pointer where to store the formula.
             :param comments: additional comments to put in the file.
+            :param format: WCNF format to use
 
             :type file_pointer: file pointer
             :type comments: list(str)
+            :type format: str
 
             Example:
 
@@ -5220,25 +5347,28 @@ class WCNFPlus(WCNF, object):
             for c in comments:
                 print(c, file=file_pointer)
 
-        ftype = 'wcnf+' if self.atms else 'wcnf'
-        print('p', ftype, self.nv, len(self.hard) + len(self.soft) + len(self.atms),
-                self.topw, file=file_pointer)
+        if format == 'legacy':
+            ftype = 'wcnf+' if self.atms else 'wcnf'
+            print('p', ftype, self.nv, len(self.hard) + len(self.soft) + len(self.atms),
+                    self.topw, file=file_pointer)
 
         # soft clauses are dumped first because
         # some tools (e.g. LBX) cannot count them properly
         for i, cl in enumerate(self.soft):
             print(self.wght[i], ' '.join(str(l) for l in cl), '0', file=file_pointer)
 
+        # hard clause either have a top weight or are marked as 'h'
+        topw = self.topw if format == 'legacy' else 'h'
         for cl in self.hard:
-            print(self.topw, ' '.join(str(l) for l in cl), '0', file=file_pointer)
+            print(topw, ' '.join(str(l) for l in cl), '0', file=file_pointer)
 
         # atmost constraints are hard
         for am in self.atms:
             if len(am) == 2:  # cardinality constraint
-                print(self.topw, ' '.join(str(l) for l in am[0]), '<=', am[1], file=file_pointer)
+                print(topw, ' '.join(str(l) for l in am[0]), '<=', am[1], file=file_pointer)
             else:  # len(am) == 3 => PB constraint
                 assert len(am[0]) == len(am[2]), 'Number of literals should be equal to the number of weights'
-                print(self.topw, 'w', ' '.join('{0}*{1}'.format(str(w), str(l)) for w, l in zip(am[2], am[0])), '<=', am[1], file=file_pointer)
+                print(topw, 'w', ' '.join('{0}*{1}'.format(str(w), str(l)) for w, l in zip(am[2], am[0])), '<=', am[1], file=file_pointer)
 
     def to_dimacs(self):
         """
@@ -5269,18 +5399,25 @@ class WCNFPlus(WCNF, object):
                 10 -4 -5 -6 7 <= 2
         """
 
-        header_lines = [f'p wcnf+ {self.nv} {len(self.hard) + len(self.soft) + len(self.atms)} {self.topw}']
         comment_lines = [f'{comment}' for comment in self.comments]
-        hard_lines = [f'{self.topw} ' + ' '.join(map(str,clause)) + ' 0' for clause in self.hard]
         soft_lines = [f'{weight} ' + ' '.join(map(str,clause)) + ' 0' for clause, weight in zip(self.soft, self.wght)]
+
+        if format == 'legacy':
+            header_lines = [f'p wcnf+ {self.nv} {len(self.hard) + len(self.soft) + len(self.atms)} {self.topw}']
+            topw = self.topw
+        else:
+            header_lines = []
+            topw = 'h'
+
+        hard_lines = [f'{topw} ' + ' '.join(map(str,clause)) + ' 0' for clause in self.hard]
 
         atmost_lines = []
         for am in self.atms:
             if len(am) == 2:  # cardinality constraint
-                atmost_lines.append(f'{self.topw} ' + ' '.join(str(l) for l in am[0]) + ' <= ' + str(am[1]))
+                atmost_lines.append(f'{topw} ' + ' '.join(str(l) for l in am[0]) + ' <= ' + str(am[1]))
             else:  # len(am) == 3 => PB constraint
                 assert len(am[0]) == len(am[2]), 'Number of literals should be equal to the number of weights'
-                atmost_lines.append(f'{self.topw} ' + 'w ' + ' '.join('{0}*{1}'.format(str(w), str(l)) for w, l in zip(am[2], am[0])) + ' <= ' + str(am[1]))
+                atmost_lines.append(f'{topw} ' + 'w ' + ' '.join('{0}*{1}'.format(str(w), str(l)) for w, l in zip(am[2], am[0])) + ' <= ' + str(am[1]))
 
         lines = '\n'.join(comment_lines + header_lines + hard_lines + soft_lines + atmost_lines) + '\n'
 

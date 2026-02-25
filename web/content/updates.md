@@ -10,6 +10,75 @@ then to keep it up-to-date is good idea.
 
 <!-- # Changelog and more -->
 
+## 25.02.2026 (*1.9.dev1*)
+
+-   Added Kissat 4.0.4 (thanks to Hosein Hadipour). Kissat's wrapper supports
+    no incrementality.
+-   Fixed a minor issue in conflict budgetting in CryptoMiniSat (thanks to
+    Julien Drapeau).
+
+## 04.02.2026 (*1.8.dev30*)
+
+-   Corrected a bug in Cadical195's propagation when an external engine is
+    attached.
+-   Added :meth:`decode_assignment()`.
+
+## 03.02.2026 (*1.8.dev29*)
+
+-   Added experimental support for rudimentary modelling with integer
+    variables.
+
+## 27.01.2026 (*1.8.dev28*)
+
+-   Added support for MSE22 WCNF format.
+
+## 21.01.2026 (*1.8.dev27*)
+
+-   Fixed a bug in the initialiser of RC2.
+
+## 20.12.2025 (*1.8.dev26*)
+
+-   Added asynchronous interruption in RC2.
+
+## 15.12.2025 (*1.8.dev25*)
+
+-   Added automatic negation handling in IDPool.
+
+## 13.10.2025 (*1.8.dev24*)
+
+-   A few impovements in BBScan.
+-   Fixed an issue in ztsd compression for Python 3.14.
+
+## 26.09.2025 (*1.8.dev23*)
+
+-   A few corrections in BBScan.
+
+## 22.09.2025 (*1.8.dev22*)
+
+-   Minor fixes in the example scripts accepting input (W)CNF files.
+-   Added BBScan, a tool for computing backbones literals of a formula.
+
+## 14.09.2025 (*1.8.dev21*)
+
+-   Added literal freezing in the ``process`` module. This will allow one to
+    apply preprocessing in the context of MaxSAT solving as well as MUS and
+    MCS enumeration.
+-   Added rudimentary support of formula preprocessing to RC2, LBX, MCSls, and
+    OptUx.
+-   Replaced the compiler for Glucose 4.2.1 (thanks to Christoph Jabs).
+-   Fixed Glucose 4.2.1 compilation on systems with musl libc.
+-   Fixed further muslinux compilation issues related to external propagation.
+
+## 26.08.2025 (*1.8.dev20*)
+
+-   Removed clause duplicates when accessing clauses of a clausified formula.
+-   Added support for Zstandard compression in formula I/O. (Requires Python
+    3.14, so not yet tested.)
+
+## 07.08.2025 (*1.8.dev19*)
+
+-   Numerous bug fixes in non-clausal formula handling.
+
 ## 03.08.2025 (*1.8.dev18*)
 
 -   Added Bica, a formula simplifier.
